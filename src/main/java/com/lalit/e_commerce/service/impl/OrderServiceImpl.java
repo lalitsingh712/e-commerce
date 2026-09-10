@@ -198,37 +198,64 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public void cancelOrder(Long orderId) {
+
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
+        // Cannot cancel a delivered order
         if (order.getStatus() == OrderStatus.DELIVERED) {
             throw new BadRequestException("Delivered order cannot be cancelled");
         }
 
+        // Cannot cancel an already cancelled order
         if (order.getStatus() == OrderStatus.CANCELLED) {
             throw new DuplicateResourceException("Order is already cancelled");
         }
 
-        //Cannot cancel if payment completed
-        if (order.getPayment() != null &&
-                order.getPayment().getPaymentStatus().equals("COMPLETED")) {
-            throw new BadRequestException("Cannot cancel order with completed payment. Please request refund instead.");
+        // Cannot cancel if payment is already completed
+        if (order.getPayment() != null
+                && "COMPLETED".equals(order.getPayment().getPaymentStatus())) {
+
+            throw new BadRequestException(
+                    "Cannot cancel order with completed payment. Please request refund instead."
+            );
         }
 
-        //REFUND STOCK - Return items back to inventory
-        for (OrderItem orderItem:order.getOrderItems()){
-            Product product=orderItem.getProduct();
-            product.setStockQuantity(product.getStockQuantity()+orderItem.getQuantity());
+        // Cancel only orders that are CONFIRMED
+        if (order.getStatus() != OrderStatus.CONFIRMED) {
+            throw new BadRequestException(
+                    "Only confirmed orders can be cancelled"
+            );
+        }
+
+        // Return ordered products back to inventory
+        for (OrderItem orderItem : order.getOrderItems()) {
+
+            Product product = orderItem.getProduct();
+
+            product.setStockQuantity(
+                    product.getStockQuantity() + orderItem.getQuantity()
+            );
+
             productRepo.save(product);
-            log.info("Refunded {} units of product: {}", orderItem.getQuantity(), product.getName());
+
+            log.info(
+                    "Refunded {} units of product: {}",
+                    orderItem.getQuantity(),
+                    product.getName()
+            );
         }
 
         // Update order status
         order.setStatus(OrderStatus.CANCELLED);
-        orderRepo.save(order);
-        log.info("Order {} cancelled and stock refunded",orderId);
-    }
 
+        orderRepo.save(order);
+
+        log.info(
+                "Order {} cancelled successfully and stock refunded",
+                orderId
+        );
+    }
     private void reduceStock(
             Product product,
             int quantity) {
